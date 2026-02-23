@@ -606,7 +606,7 @@ requires-dist = [
     { name = "matplotlib", specifier = ">=3.10.8" },
     { name = "numpy", specifier = ">=2.4.2" },
     { name = "scipy", specifier = ">=1.17.0" },
-    { name = "sofar", specifier = ">=1.2.3" },
+    { name = "sofar", specifier = "==1.2.1" },
     { name = "soundfile", specifier = ">=0.13.1" },
     { name = "soxr", specifier = ">=1.0.0" },
 ]
@@ -728,18 +728,17 @@ wheels = [
 
 [[package]]
 name = "sofar"
-version = "1.2.3"
+version = "1.2.1"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "beautifulsoup4" },
     { name = "netcdf4" },
     { name = "numpy" },
-    { name = "packaging" },
     { name = "requests" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/fd/2b/dfeea31a5419e1e93dcf1fc3239e12d91772ab74a931d5dd3ae2bf434e90/sofar-1.2.3.tar.gz", hash = "sha256:31058d4460b0577016ce0f5de66376e7e1397b1bddc22e7c7fc036079f63d364", size = 383297, upload-time = "2026-02-03T17:26:06.646Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/5c/b1/62ee2f24e99e2b0f26f0a0eb78950053f5513624e2948433a6fa8ed32170/sofar-1.2.1.tar.gz", hash = "sha256:4450a34588500815f726e153c74c0edfab4773db5ff4d9e4eace23c4556ada90", size = 382643, upload-time = "2024-12-12T16:06:53.058Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/92/b3/eb82436d5f725f4702a1376c7f53578f8f711e1a1d9ba4e7926610cf1dbe/sofar-1.2.3-py3-none-any.whl", hash = "sha256:d1c0813bdb2e56fc820ace5caaeebdbb22d562ae9f7c07af230a32ec71b63327", size = 440088, upload-time = "2026-02-03T17:26:05.222Z" },
+    { url = "https://files.pythonhosted.org/packages/21/81/1aa5e415352b596868c9b64624cebcc1748121d7832438ebb4d3fc84cba0/sofar-1.2.1-py3-none-any.whl", hash = "sha256:dc2b7ba8be077a45001d02c4515dd61dc702ecd42aabd2db6428992d31622e30", size = 439643, upload-time = "2024-12-12T16:06:49.567Z" },
 ]
 
 [[package]]

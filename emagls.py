@@ -75,15 +75,18 @@ def EndtoEnd_MagLS_weights(
 
     # Max SH order for plane-wave expansion: Nmax ≈ max(user_order, ka)
     Nmax = int(max(order, np.ceil(fs * np.pi * mic_radius / c)))
+    if Nmax > 24:
+        print(
+            f"Warning: Nmax={Nmax} is quite high for order={order}. Capping to Nmax=24 "
+            f"to prevent excessive computation and potential instability."
+        )
+        Nmax = min(Nmax, 24)  # Cap Nmax to prevent excessive computation and instability
     N_sph_harm = (order + 1) ** 2
     freqs = np.fft.rfftfreq(NFFT, d=1 / fs)
     k = 2 * np.pi * freqs / c
-    num_directions = grid_hrirs.shape[1]  # number of HRIR directions
     # Zero-pad HRIRs
     hL = np.pad(hrirs_left, ((0, NFFT - hrirs_left.shape[0]), (0, 0)), mode="constant")
-    hR = np.pad(
-        hrirs_right, ((0, NFFT - hrirs_right.shape[0]), (0, 0)), mode="constant"
-    )
+    hR = np.pad(hrirs_right, ((0, NFFT - hrirs_right.shape[0]), (0, 0)), mode="constant")
 
     # Group delay alignment to avoid frequency-dependent linear phase
     # grpDL = np.median(group_delay((np.sum(hL, axis=1), 1), w=freqs, fs=fs)[1])
@@ -105,18 +108,22 @@ def EndtoEnd_MagLS_weights(
 
     # SH bases at mic and HRIR directions; keep first (order+1)^2 terms
     Y_NM_mic = sph_harm_all(Nmax, az_mic, zenith_mic, kind="real")
-    # SMA encoder (Eq. 5): mic pressure -> SH coefficients
+    # Y_Lo_pinv: The SMA Encoder (E_{N,M} in Eq. 5). Projects mic pressure to SH coefficients.
     Y_Lo_pinv = np.linalg.pinv(Y_NM_mic[:, :N_sph_harm])
-    # SH basis at target HRTF directions
+    # Y_NM_hrtf: SH basis evaluated at target HRTF directions (grid_hrirs).
     Y_NM_hrtf = sph_harm_all(Nmax, az_hrirs, zenith_hrirs, kind="real")
 
     # Plane-wave encoding (forward array model)
     PNM_mic = np.einsum("kn,nr->rnk", B_N, Y_NM_mic.T, optimize=True)
 
     # Project to desired SH order (Eq. 5)
+    # This is equivalent to `smairMat` in the MATLAB reference implementation
     PN = np.einsum("bm,mnk->bnk", Y_Lo_pinv, PNM_mic, optimize=True)
+    # force last bin to be real
+    PN[:, :, -1] = np.real(PN[:, :, -1])
 
     # System transfer matrix: HRTFs in SH basis
+    # This is `pwGrid` in the MATLAB reference implementation.
     PNM_hrtf = np.einsum("bnk,nr->brk", PN, Y_NM_hrtf.T, optimize=True)
 
     # Closest frequency index to MagLS cut-off
@@ -143,6 +150,9 @@ def EndtoEnd_MagLS_weights(
     W_mls_r[:cut_off_indx] = np.einsum(
         "kr, krn -> kn", HR[:cut_off_indx], Y_reg_inv[:cut_off_indx], optimize=True
     )
+
+    W_mls_l[0] = np.real(W_mls_l[0])  # Ensure DC is real
+    W_mls_r[0] = np.real(W_mls_r[0])  # Ensure DC is real
 
     # Magnitude LS above cut-off with phase propagation (Eq. 14-15)
     for i in range(cut_off_indx, len(freqs)):
@@ -225,3 +235,198 @@ def EndtoEnd_MagLS_weights(
     w_mls_r = w_mls_r * fade_win[..., None]
 
     return w_mls_l, w_mls_r
+
+
+def EndtoEnd_LS_weights(
+    hrirs_left: np.ndarray,
+    hrirs_right: np.ndarray,
+    grid_mic_orig: np.ndarray,
+    grid_hrirs: np.ndarray,
+    fs: int = 48000,
+    c: float = 343.0,
+    order: int = 4,
+    NFFT: int = 1024,
+    f_cut: int = 2000,
+    reg_const: float = 0.01,
+    sig_len: int = 512,
+    diffuseness_constraint: bool = False,
+    diff_const_imag_thld: float = 1e-9,
+):
+    """
+    Compute the Magnitude Least Squares weights for a given set of HRIRs and
+    microphone array positions.
+    Parameters
+    ----------
+    hrirs_left : np.ndarray
+        The left ear HRIRs.
+    hrirs_right : np.ndarray
+        The right ear HRIRs.
+    grid_mic_orig : np.ndarray
+        The microphone array positions in cartesian coordinates.
+    grid_hrirs : np.ndarray
+        The HRIR directions in cartesian coordinates.
+    fs : float, optional
+        The sampling frequency in Hz. The default is 48000.
+    c : float, optional
+        The speed of sound in m/s. The default is 343.
+    order : int, optional
+        The maximum order of the spherical harmonics. The default is 4.
+    NFFT : int, optional
+        The number of FFT points. The default is 1024.
+    f_cut : int, optional
+        The cut-off frequency in Hz. The default is 2000.
+    reg_const : float, optional
+        The regularization constant. The default is 0.01.
+    sig_len : int, optional
+        The length of the output filters. The default is 512.
+    diffuseness_constraint : bool, optional
+        Apply diffuseness constraint. The default is False.
+    diff_const_imag_thld : float, optional
+        The threshold for the imaginary part of the diffuseness constraint. The default is 1e-9.
+    Returns
+    -------
+    w_ls_l : np.ndarray
+        The left ear Magnitude Least Squares weights.
+    w_ls_r : np.ndarray
+        The right ear Magnitude Least Squares weights.
+
+    """
+
+    # Geometry
+    az_mic, zenith_mic, r_mic = cart2sph(grid_mic_orig[0], grid_mic_orig[1], grid_mic_orig[2])
+    az_hrirs, zenith_hrirs, r_hrirs = cart2sph(grid_hrirs[0], grid_hrirs[1], grid_hrirs[2])
+    # Mic array radius
+    mic_radius = r_mic[0]
+
+    # Max spherical harmonic order required for accurate plane-wave expansion
+    # Nmax ≈ max(user_order, ka), with k = 2πf/c and a = mic_radius
+    Nmax = int(max(order, np.ceil(fs * np.pi * mic_radius / c)))
+    if Nmax > 24:
+        print(
+            f"Warning: Nmax={Nmax} is quite high for order={order}. Capping to Nmax=24 "
+            f"to prevent excessive computation and potential instability."
+        )
+        Nmax = min(Nmax, 24)  # Cap Nmax to prevent excessive computation and instability
+    N_sph_harm = (order + 1) ** 2
+    freqs = np.fft.rfftfreq(NFFT, d=1 / fs)
+    k = 2 * np.pi * freqs / c
+    # Zero-pad HRIRs
+    hL = np.pad(hrirs_left, ((0, NFFT - hrirs_left.shape[0]), (0, 0)), mode="constant")
+    hR = np.pad(hrirs_right, ((0, NFFT - hrirs_right.shape[0]), (0, 0)), mode="constant")
+
+    # Compute the group delay
+    grpDL, grpDR = hrir_group_delay(hL, hR, fs, NFFT)
+
+    # Time align the HRIRs
+    hL = apply_subsample_delay(hL, -grpDL)
+    hR = apply_subsample_delay(hR, -grpDR)
+
+    # Transform to frequency domain
+    HL = np.fft.rfft(hL, axis=0)
+    HR = np.fft.rfft(hR, axis=0)
+
+    # Radial filters for rigid spherical microphone array (models scattering - Eq. (4)
+    B_N = -plane_wave_sphere_radial_filters_to_order_n(Nmax, k, grid_mic_orig, sphere_type="rigid")
+
+    # Spherical harmonics at microphone and HRIR directions
+    Y_NM_mic = sph_harm_all(Nmax, az_mic, zenith_mic, kind="real")
+    # Y_Lo_pinv: The SMA Encoder (E_{N,M} in Eq. 5). Projects mic pressure to SH coefficients.
+    Y_Lo_pinv = np.linalg.pinv(Y_NM_mic[:, :N_sph_harm])
+    # Y_NM_hrtf: SH basis evaluated at target HRTF directions (grid_hrirs).
+    Y_NM_hrtf = sph_harm_all(Nmax, az_hrirs, zenith_hrirs, kind="real")
+
+    # Plane-wave encoding of microphone signals (forward model of the array response)
+    PNM_mic = np.einsum("kn,nr->rnk", B_N, Y_NM_mic.T, optimize=True)
+
+    # Truncated SH coefficient projection of SMA
+    PN = np.einsum("bm,mnk->bnk", Y_Lo_pinv, PNM_mic, optimize=True)
+
+    # PNM_hrtf: system transfer matrix
+    PNM_hrtf = np.einsum("bnk,nr->brk", PN, Y_NM_hrtf.T, optimize=True)
+
+    # Frequency-wise SVD of SH-domain HRTFs
+    U, S, Vh = np.linalg.svd(np.conj(PNM_hrtf).T, full_matrices=False)
+
+    # Regularized inverse singular values
+    max_s = np.max(S, axis=1, keepdims=True)
+    regularized_S = 1.0 / np.maximum(S, reg_const * max_s)
+
+    # Regularized pseudo-inverse operator
+    Y_reg_inv = np.einsum("krb,kb,kbl->krl", U, regularized_S, Vh, optimize=True)
+
+    # Initialize W_ls_l and W_ls_r (frequency-domain SH weights for left and right ears)
+    W_ls_l = np.zeros((NFFT // 2 + 1, N_sph_harm), dtype=np.complex128)
+    W_ls_r = np.zeros((NFFT // 2 + 1, N_sph_harm), dtype=np.complex128)
+
+    # Linear least squares solution below cut-off frequency
+    W_ls_l = np.einsum("kr, krn -> kn", HL, Y_reg_inv, optimize=True)
+    W_ls_r = np.einsum("kr, krn -> kn", HR, Y_reg_inv, optimize=True)
+
+    W_ls_l[0] = np.real(W_ls_l[0])  # Ensure DC is real
+    W_ls_r[0] = np.real(W_ls_r[0])  # Ensure DC is real
+    # Magnitude least squares above cut-off frequency
+
+    # Optional diffuseness constraint (Zaunschirm): match diffuse-field covariance
+    if diffuseness_constraint:
+        grid_weights = calculate_grid_weights(grid_hrirs)
+        # Normalize grid weights to sum to 1
+        grid_weights = grid_weights / np.sum(grid_weights)
+        for i in range(1, len(freqs)):  # avoid zero frequency
+            # Target covariance from original HRTFs (Eq. 18)
+            H = np.stack((HL[i], HR[i]), axis=0)  # (2, numDirs)
+            # Weighted Covariance: R = H @ W @ H^H
+            # This is equivalent to H * weights @ H.conj().T
+            R = (H * grid_weights) @ H.conj().T
+            R = (R + R.conj().T) / 2  # Force Hermitian symmetry
+            L = np.linalg.cholesky(R)
+
+            # Rendered covariance from LS weights
+            # The rendered HRTFs are HHat @ Y_NM_hrtf[:N_sph_harm, :].T
+            HHat = np.stack((W_ls_l[i], W_ls_r[i]), axis=0)  # (2, N_sph_harm)
+            H_rendered = HHat @ PNM_hrtf[..., i]
+
+            RHat = (H_rendered * grid_weights) @ H_rendered.conj().T
+            RHat = (RHat + RHat.conj().T) / 2
+            LHat = np.linalg.cholesky(RHat)
+
+            # Find the optimal mixing matrix M (Eq. 27-28)
+            # This aligns the rendered covariance to the target
+            # We use SVD to find the unitary part of the mapping
+            U, _, Vh = np.linalg.svd(LHat.conj().T @ L)
+            Q = Vh.conj().T @ U.conj().T
+
+            # M maps the rendered HRTFs to the target covariance space
+            M = L @ Q @ np.linalg.inv(LHat)
+            # Apply to SH weights
+            Hcorr = M @ HHat
+            W_ls_l[i] = Hcorr[0]
+            W_ls_r[i] = Hcorr[1]
+
+            # Sanity check
+            # Project corrected weights back to directions to compare covariance
+            H_rend_corr = Hcorr @ PNM_hrtf[..., i]
+            R_actual = (H_rend_corr * grid_weights) @ H_rend_corr.conj().T
+            # R is the target calculated at the start of the loop
+            assert np.allclose(R_actual, R, atol=1e-6)
+
+    # Back to time domain
+    w_ls_l = np.fft.irfft(W_ls_l, axis=0)
+    w_ls_r = np.fft.irfft(W_ls_r, axis=0)
+
+    # Shift to linear-phase-like alignment
+    n_shift = NFFT // 2
+    w_ls_l = apply_subsample_delay(w_ls_l, n_shift)
+    w_ls_r = apply_subsample_delay(w_ls_r, n_shift - grpDL + grpDR)
+
+    # Trim to target length
+    start_idx = n_shift - sig_len // 2
+    end_idx = n_shift + sig_len // 2
+    w_ls_l = w_ls_l[start_idx:end_idx]
+    w_ls_r = w_ls_r[start_idx:end_idx]
+
+    # Apply fade window
+    fade_win = get_fade_window(sig_len)
+    w_ls_l = w_ls_l * fade_win[..., None]
+    w_ls_r = w_ls_r * fade_win[..., None]
+
+    return w_ls_l, w_ls_r

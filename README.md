@@ -29,6 +29,12 @@ Outputs:
 - binaural_signal_test.wav
 - binaural_rotated_signal_test.wav
 - binaural_rotating_signal_test.wav
+- smr_err_freq_vs_az_Summed_Magnitude_Response_Error_(dB)_vs._Azimuth.png
+- diffuse_field_val_EmagLS_vs_LS.png
+
+Plots:
+![Summed Magnitude Response Error vs Azimuth](smr_err_freq_vs_az_Summed_Magnitude_Response_Error_(dB)_vs._Azimuth.png)
+![Diffuse Field Validation](diffuse_field_val_EmagLS_vs_LS.png)
 
 ## Data expectations
 - HRIRs are loaded from a SOFA file via `sofar` (see [Sofar](https://github.com/pyfar/sofar) package for details).

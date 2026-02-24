@@ -83,18 +83,18 @@ def get_em32_grid(mic_radius: float = 0.042) -> np.ndarray:
                       21.0, 58.0, 121.0, 159.0, 69.0, 90.0,
                       111.0, 90.0, 32.0, 55.0, 90.0, 125.0,
                       148.0, 125.0, 90.0, 55.0, 21.0, 58.0,
-                      122.0, 159.0]) * np.pi / 180
+                      122.0, 159.0]) * np.pi / 180 # zenith angle (colatitude)
 
     phi = np.array([0.0, 32.0, 0.0, 328.0, 0.0, 45.0,
                     69.0, 45.0, 0, 315.0, 291.0, 315.0,
                     91.0, 90.0, 90.0, 89.0, 180.0, 212.0,
                     180.0, 148.0, 180.0, 225.0, 249.0, 225.0,
                     180.0, 135.0, 111.0, 135.0, 269.0, 270.0,
-                    270.0, 271.0]) * np.pi / 180
+                    270.0, 271.0]) * np.pi / 180 # azimuth angle
 
     r_mic = mic_radius * np.ones_like(theta)
     # Convert from spherical to Cartesian coordinates
-    return sph2cart(theta, phi, r_mic)
+    return sph2cart(phi, theta, r_mic)
 
 
 def mnArrays(nMax: int) -> tuple[np.ndarray, np.ndarray]:
